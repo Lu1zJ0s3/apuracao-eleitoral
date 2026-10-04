@@ -1,0 +1,8 @@
+site*.tar
+*.log
+.sites-runtime/
+node_modules/
+verification-*.png
+.vercel/
+.env*
+public/
