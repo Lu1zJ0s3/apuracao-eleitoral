@@ -2,6 +2,10 @@ const BASE = 'https://resultados.tse.jus.br/oficial/';
 const UFS = 'ac al ap am ba ce df es go ma mt ms mg pa pb pr pe pi rj rn rs ro rr sc sp se to'.split(' ');
 const caches=new Map(), flights=new Map();let election, configAt = 0;
 const lastGood = new Map();
+const timestamp = value => {
+  const match = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2}:\d{2})$/.exec(value);
+  return match ? Date.parse(`${match[3]}-${match[2]}-${match[1]}T${match[4]}-03:00`) : NaN;
+};
 const number = value => {
   const parsed = Number(String(value ?? '').replace(',', '.'));
   if (!Number.isFinite(parsed) || value == null || value === '') throw new Error('Campo numérico ausente no TSE');
@@ -24,7 +28,9 @@ async function discover() {
   return election;
 }
 function normalize(raw, uf, source, e) {
-  if (raw.f !== 'o' || String(raw.ele) !== String(e.id) || raw.t !== '1' || raw.cdabr?.toLowerCase() !== uf || raw.dg !== e.date) throw new Error('Dados incompatíveis com a eleição selecionada');
+  if (raw.f !== 'o' || String(raw.ele) !== String(e.id) || raw.t !== '1' || raw.cdabr?.toLowerCase() !== uf) throw new Error('Dados incompatíveis com a eleição selecionada');
+  const generated = timestamp(`${raw.dg} ${raw.hg}`);
+  if (!Number.isFinite(generated) || generated < timestamp(`${e.date} 00:00:00`)) throw new Error('Data de geração inválida no TSE');
   const cargo = raw.carg?.find(c => c.cd === e.cargo);
   if (!cargo || !raw.s || !raw.v) throw new Error('Resposta sem resultado presidencial');
   const candidates = (cargo.agr ?? []).flatMap(a => (a.par ?? []).flatMap(p => (p.cand ?? []).map(c => ({name: c.nmu || c.nm, number: c.n, party: p.sg, votes: number(c.vap), percent: number(c.pvapn ?? c.pvap), elected: c.e === 's',status:c.st||'',destination:c.dvt||''})))).sort((a,b) => b.votes - a.votes);
@@ -38,7 +44,7 @@ async function loadUf(uf, e) {
   try {
     const normalized = normalize(await official(path), uf, BASE + path, e);
     const previous = lastGood.get(key);
-    if (previous && normalized.generatedAt < previous.generatedAt) return {...previous, stale: true, error: 'TSE retornou uma versão anterior; mantendo a última leitura'};
+    if (previous && timestamp(normalized.generatedAt) < timestamp(previous.generatedAt)) return {...previous, stale: true, error: 'TSE retornou uma versão anterior; mantendo a última leitura'};
     lastGood.set(key, normalized);
     return normalized;
   } catch (error) {
