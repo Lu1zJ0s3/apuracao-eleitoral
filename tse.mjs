@@ -16,19 +16,20 @@ async function official(path) {
   if (!response.ok) throw new Error(`TSE respondeu HTTP ${response.status}`);
   return response.json();
 }
-async function discover() {
-  if (election && Date.now() - configAt < 300000) return election;
+async function discover(cargo) {
+  if (!election || Date.now() - configAt >= 300000) {
   const config = await official('comum/config/ele-c.json');
   if (config.f !== 'o') throw new Error('Configuração não é do ambiente oficial');
-  const pleito = config.pl.find(p => p.dt === '04/10/2026' && p.c === 'ele2026');
-  const selected = pleito?.e.find(e => e.t === '1' && e.tp === '8' && e.abr.some(a => a.cp.some(c => c.cd === '1')));
-  if (!selected) throw new Error('Eleição presidencial de 04/10/2026 não encontrada no TSE');
-  election = {cycle: pleito.c, id: selected.cd, stateId:pleito.e.find(e=>e.tp==='1'&&e.t==='1')?.cd, date: pleito.dt, title: selected.nm};
+  election = config.pl;
   configAt = Date.now();
-  return election;
+  }
+  const today = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  const eligible = election.filter(p=>p.c==='ele2026' && timestamp(`${p.dt} 00:00:00`) <= Date.parse(today+'T23:59:59-03:00')).flatMap(p=>p.e.filter(e=>e.tp===(cargo==='1'?'8':'1') && e.abr.some(a=>a.cp.some(c=>c.cd===cargo))).map(e=>({cycle:p.c,id:e.cd,date:p.dt,title:e.nm,turn:e.t,cargo,applicableUfs:e.abr.map(a=>a.cd.toLowerCase())}))).sort((a,b)=>timestamp(`${b.date} 00:00:00`)-timestamp(`${a.date} 00:00:00`));
+  if (!eligible.length) throw new Error('Eleição não encontrada no TSE para este cargo');
+  return eligible[0];
 }
 function normalize(raw, uf, source, e) {
-  if (raw.f !== 'o' || String(raw.ele) !== String(e.id) || raw.t !== '1' || raw.cdabr?.toLowerCase() !== uf) throw new Error('Dados incompatíveis com a eleição selecionada');
+  if (raw.f !== 'o' || String(raw.ele) !== String(e.id) || raw.t !== e.turn || raw.cdabr?.toLowerCase() !== uf) throw new Error('Dados incompatíveis com a eleição selecionada');
   const generated = timestamp(`${raw.dg} ${raw.hg}`);
   if (!Number.isFinite(generated) || generated < timestamp(`${e.date} 00:00:00`)) throw new Error('Data de geração inválida no TSE');
   const cargo = raw.carg?.find(c => c.cd === e.cargo);
@@ -37,9 +38,10 @@ function normalize(raw, uf, source, e) {
   return {uf: uf.toUpperCase(), cargo:e.cargo, vacancies:Number(cargo.nv), sections: number(raw.s.ts), countedSections: number(raw.s.st), percent: number(raw.s.pstn ?? raw.s.pst), validVotes: number(raw.v.vvc), totalVotes: number(raw.v.tv), candidates, generatedAt: `${raw.dg} ${raw.hg}`, totalizedAt: `${raw.dt || raw.dg} ${raw.ht || raw.hg}`, source, version: raw.idg, complete: raw.tf === 's', stale: false};
 }
 async function loadUf(uf, e) {
+  if (!e.applicableUfs.includes('br') && !e.applicableUfs.includes(uf)) return {uf:uf.toUpperCase(),unavailable:true,notApplicable:true};
   if(e.cargo==='8'&&uf!=='df')return {uf:uf.toUpperCase(),unavailable:true,notApplicable:true};
   if(e.cargo==='7'&&uf==='df')e={...e,cargo:'8'};
-  const key=e.cargo+':'+uf;
+  const key=e.id+':'+e.cargo+':'+uf;
   const path = `${e.cycle}/${e.id}/dados/${uf}/${uf}-c${e.cargo.padStart(4,'0')}-e${e.id.padStart(6,'0')}-u.json`;
   try {
     const normalized = normalize(await official(path), uf, BASE + path, e);
@@ -53,8 +55,7 @@ async function loadUf(uf, e) {
   }
 }
 async function refresh(cargo) {
-  const discovered = await discover();
-  const e={...discovered,cargo,id:cargo==='1'?discovered.id:discovered.stateId};
+  const e = await discover(cargo);
   const locations = cargo==='1'?['br', ...UFS]:UFS, records = new Array(locations.length);
   let cursor = 0;
   await Promise.all(Array.from({length: 6}, async () => {
