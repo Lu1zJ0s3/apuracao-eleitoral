@@ -16,7 +16,7 @@ async function official(path) {
   if (!response.ok) throw new Error(`TSE respondeu HTTP ${response.status}`);
   return response.json();
 }
-async function discover(cargo) {
+async function discover(cargo, turn) {
   if (!election || Date.now() - configAt >= 300000) {
   const config = await official('comum/config/ele-c.json');
   if (config.f !== 'o') throw new Error('Configuração não é do ambiente oficial');
@@ -26,7 +26,9 @@ async function discover(cargo) {
   const today = new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const eligible = election.filter(p=>p.c==='ele2026' && timestamp(`${p.dt} 00:00:00`) <= Date.parse(today+'T23:59:59-03:00')).flatMap(p=>p.e.filter(e=>e.tp===(cargo==='1'?'8':'1') && e.abr.some(a=>a.cp.some(c=>c.cd===cargo))).map(e=>({cycle:p.c,id:e.cd,date:p.dt,title:e.nm,turn:e.t,cargo,applicableUfs:e.abr.map(a=>a.cd.toLowerCase())}))).sort((a,b)=>timestamp(`${b.date} 00:00:00`)-timestamp(`${a.date} 00:00:00`));
   if (!eligible.length) throw new Error('Eleição não encontrada no TSE para este cargo');
-  return eligible[0];
+  const selected = turn === 'auto' ? eligible[0] : eligible.find(e=>e.turn===turn);
+  if (!selected) throw new Error('Este cargo não possui disputa no turno selecionado');
+  return selected;
 }
 function normalize(raw, uf, source, e) {
   if (raw.f !== 'o' || String(raw.ele) !== String(e.id) || raw.t !== e.turn || raw.cdabr?.toLowerCase() !== uf) throw new Error('Dados incompatíveis com a eleição selecionada');
@@ -54,8 +56,8 @@ async function loadUf(uf, e) {
     return previous ? {...previous, stale: true, error: error.message} : {uf: uf.toUpperCase(), unavailable: true, source: BASE + path, error: error.message};
   }
 }
-async function refresh(cargo) {
-  const e = await discover(cargo);
+async function refresh(cargo, turn, key) {
+  const e = await discover(cargo, turn);
   const locations = cargo==='1'?['br', ...UFS]:UFS, records = new Array(locations.length);
   let cursor = 0;
   await Promise.all(Array.from({length: 6}, async () => {
@@ -67,15 +69,17 @@ async function refresh(cargo) {
   const national = cargo==='1'?records[0]:null;
   if (national?.unavailable) throw new Error(national.error);
   const cached = {election: e, national, states: cargo==='1'?records.slice(1):records, fetchedAt: new Date().toISOString(), refreshSeconds: 30, partial: records.some(r => r.stale || (r.unavailable&&!r.notApplicable))};
-  caches.set(cargo,cached);
+  caches.set(key,cached);
   return cached;
 }
-export async function getResults({force = false,cargo='1'} = {}) {
+export async function getResults({force = false,cargo='1',turn='auto'} = {}) {
   if(!['1','3','5','6','7','8'].includes(cargo))throw new Error('Cargo inválido');
-  const cached=caches.get(cargo);
+  if(!['auto','1','2'].includes(turn))throw new Error('Turno inválido');
+  const key=cargo+':'+turn;
+  const cached=caches.get(key);
   if (!force && cached && Date.now() - Date.parse(cached.fetchedAt) < 30000) return cached;
-  if (!flights.has(cargo)) flights.set(cargo,refresh(cargo).finally(() => {flights.delete(cargo);}));
-  try { return await flights.get(cargo); }
+  if (!flights.has(key)) flights.set(key,refresh(cargo,turn,key).finally(() => {flights.delete(key);}));
+  try { return await flights.get(key); }
   catch (error) {
     if (cached) return {...cached, partial: true, stale: true, error: error.message};
     throw error;

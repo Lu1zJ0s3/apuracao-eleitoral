@@ -8,7 +8,7 @@ export default async function handler(req, res) {
   }
   const url = new URL(req.url, 'http://localhost');
   try {
-    const result = await getResults({cargo:url.searchParams.get('cargo') || '1'});
+    const result = await getResults({cargo:url.searchParams.get('cargo') || '1',turn:url.searchParams.get('turn') || 'auto'});
     return res.status(200).json(result);
   } catch (error) {
     return res.status(502).json({error:error.message});

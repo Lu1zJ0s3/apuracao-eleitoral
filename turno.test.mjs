@@ -14,6 +14,12 @@ test('seleciona segundo turno, preserva cargos do primeiro e aceita geração po
     const {getResults}=await import('./tse.mjs?test');
     const president=await getResults({cargo:'1'});
     assert.equal(president.election.id,'6258');assert.equal(president.national.generatedAt,'26/10/2026 00:01:00');
+    const first=await getResults({cargo:'1',turn:'1'});assert.equal(first.election.id,'6257');
+    const second=await getResults({cargo:'1',turn:'2'});assert.equal(second.election.id,'6258');
+    assert.equal((await getResults({cargo:'1',turn:'1'})).election.turn,'1');
+    assert.equal((await getResults({cargo:'3',turn:'1'})).states.filter(s=>!s.unavailable).length,27);
+    await assert.rejects(getResults({cargo:'5',turn:'2'}),/não possui disputa/);
+    await assert.rejects(getResults({turn:'3'}),/Turno inválido/);
     const senate=await getResults({cargo:'5'});assert.equal(senate.election.turn,'1');
     const governor=await getResults({cargo:'3'});assert.equal(governor.election.turn,'2');assert.equal(governor.states.filter(s=>!s.unavailable).length,1);assert.equal(governor.partial,false);
   }finally{globalThis.fetch=original;}

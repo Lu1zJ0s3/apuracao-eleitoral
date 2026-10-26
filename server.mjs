@@ -5,7 +5,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1:8765');
   try {
     if (url.pathname === '/api/results') {
-      const body = await getResults({force: url.searchParams.get('refresh') === '1',cargo:url.searchParams.get('cargo')||'1'});
+      const body = await getResults({force: url.searchParams.get('refresh') === '1',cargo:url.searchParams.get('cargo')||'1',turn:url.searchParams.get('turn')||'auto'});
       res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
       res.end(JSON.stringify(body));
     } else if(url.pathname==='/app.js'){
